@@ -1,0 +1,6 @@
+{
+    "files.watcherExclude": {
+        "Lagrange.OneBot": true,
+        ".git": true
+    }
+}
