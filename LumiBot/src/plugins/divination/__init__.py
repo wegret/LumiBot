@@ -2,7 +2,7 @@ from nonebot import get_plugin_config
 from nonebot.plugin import PluginMetadata
 
 from .config import Config
-from nonebot import on_message
+from nonebot.plugin.on import on_command, on_message, on_notice, on_regex, on_keyword
 from nonebot.rule import to_me, Rule
 from nonebot.adapters import Bot, Event
 from nonebot.adapters.onebot.v11 import Message, MessageSegment
@@ -25,8 +25,8 @@ def contains_keyword(keyword: str):
         text = str(event.get_message())
         return keyword in text
     return Rule(_contains_keyword)
-    
-divine = on_message(rule=to_me() & contains_keyword("求签"))
+
+divine = on_keyword({"求签"}, priority=2, block=True)
 
 import random
 import json

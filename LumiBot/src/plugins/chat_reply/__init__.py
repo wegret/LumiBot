@@ -24,6 +24,13 @@ from nonebot.typing import T_State
 import erniebot
 import os
 import yaml
+from collections import defaultdict
+
+chat_priority = 3
+
+'''
+erniebot配置文件：chat_config.yaml
+'''
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 config_path = os.path.join(current_dir, 'chat_config.yaml')
@@ -35,35 +42,25 @@ ACCESS_TOKEN = config['chat']['access_token']
 erniebot.api_type = API_TYPE
 erniebot.access_token = ACCESS_TOKEN
 
-def contains_keyword(keyword: str):
-    async def _contains_keyword(bot: Bot, event: Event, state: T_State) -> bool:
-        text = str(event.get_message())
-        logger.info(f"消息：{text} 结果：{keyword in text}")
-        return keyword in text
-    return Rule(_contains_keyword)
-
-chat = on_message(rule=to_me() & contains_keyword("你好"))
-
+'''
+聊天记录和启动状态
+'''
 chating_dict = {}   # 存储qq号是否已经开始聊天
-def is_chating(user_id):
-    if user_id in chating_dict and chating_dict[user_id] == 1:
-        return True
-    else:
-        chating_dict[user_id] = 0
-        return False
+user_sessions = defaultdict(list)   # 聊天记录
 
-from collections import defaultdict
-user_sessions = defaultdict(list)
-
+'''
+大模型和prompt
+'''
 base_role = "猫娘"
 base_prompt = f"请你扮演一个{base_role}，根据下面的聊天记录进行回复。"
 
 async def get_model_response(text, user_id):
     global base_prompt
+    global base_role
     global user_sessions
 
     session_text = "".join([f"{entry['role']}: {entry['content']}\n" for entry in user_sessions[user_id]])
-    prompt = base_prompt + session_text + f"用户: {text}\n猫娘:"
+    prompt = base_prompt + session_text + f"用户: {text}\n {base_role}:"
 
     response = erniebot.ChatCompletion.create(
         model='ernie-3.5',
@@ -77,6 +74,46 @@ async def get_model_response(text, user_id):
 
     return model_reply
 
+'''
+状态机
+'''
+
+# 启动聊天
+chat_start = on_command("开始聊天", block=True, priority=chat_priority)
+@chat_start.handle()
+async def handle_start(bot: Bot, matcher: Matcher, event: MessageEvent):
+    user_id = event.get_user_id()
+    reply = f"[CQ:at,qq={user_id}]"
+    if chating_dict.get(user_id, 0) == 1:
+        reply = reply + "我们已经在聊天了呢！"
+    else:
+        reply = reply + "好的，我们开始聊天吧！"
+    chating_dict[user_id] = 1
+    await bot.send(event=event, message=Message(reply), auto_escape=True)
+
+# 结束聊天
+chat_end = on_command("结束聊天", block=True, priority=chat_priority)
+@chat_end.handle()
+async def handle_end(bot: Bot, matcher: Matcher, event: MessageEvent):
+    global user_sessions
+
+    user_id = event.get_user_id()
+    reply = f"[CQ:at,qq={user_id}]"
+    if chating_dict.get(user_id, 0) == 0:
+        reply = reply + "我们没在聊天呢！"
+    else:
+        reply = reply + "聊天结束啦！"
+        user_sessions[user_id].clear()
+    chating_dict[user_id] = 0
+    await bot.send(event=event, message=Message(reply), auto_escape=True)
+
+# 聊天中
+def chat_rule():
+    async def _chat_rule(bot: Bot, event: Event, state: T_State) -> bool:
+        user_id = event.get_user_id()
+        return chating_dict.get(user_id, 0) == 1
+    return Rule(_chat_rule)
+chat = on_message(rule=chat_rule(), priority=chat_priority)
 
 @chat.handle()
 async def handle_chat(bot: Bot, matcher: Matcher, event: MessageEvent):
@@ -85,12 +122,5 @@ async def handle_chat(bot: Bot, matcher: Matcher, event: MessageEvent):
 
     logger.info(f"输入艾特文字{text}")
 
-    if is_chating(user_id):
-        reply = await get_model_response(text, user_id)
-        await bot.send(event=event, message=Message(f"[CQ:at,qq={user_id}] {reply}"), auto_escape=True)
-    elif "开始聊天" in text:
-        chating_dict[user_id] = 1
-        await bot.send(event=event, message=Message(f"[CQ:at,qq={user_id}] 好的，我们开始聊天吧！"), auto_escape=True)
-    elif "结束聊天" in text:
-        chating_dict[user_id] = 0
-        await bot.send(event=event, message=Message(f"[CQ:at,qq={user_id}] 聊天结束啦！"), auto_escape=True)
+    reply = await get_model_response(text, user_id)
+    await bot.send(event=event, message=Message(f"[CQ:at,qq={user_id}] {reply}"), auto_escape=True)
