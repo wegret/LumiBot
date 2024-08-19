@@ -114,4 +114,129 @@ async def handle_ask_contest(bot: Bot, event: MessageEvent):
         reply = reply + f"{contest['name']}, {beijing_start_time}\n"
     await bot.send(event=event, message=Message(reply), auto_escape=True)
 
+'''
+比赛提醒
+'''
 
+from nonebot.log import logger
+
+reminder_group = []     # 订阅提醒的群聊
+reminder_user = []      # 订阅提醒的用户
+
+reminder_start = on_command("cf比赛提醒开启", block=True)
+@reminder_start.handle()
+async def handle_reminder_start(bot: Bot, event: MessageEvent):
+    logger.info("提醒！")
+    if isinstance(event, GroupMessageEvent):
+        if event.group_id not in reminder_group:
+            reminder_group.append(event.group_id)
+            await bot.send(event=event, message="群聊比赛提醒已开启！")
+        else:
+            await bot.send(event=event, message="本群已经开启了比赛提醒！")
+    elif isinstance(event, PrivateMessageEvent):
+        user_id = event.get_user_id()
+        if user_id not in reminder_user:
+            reminder_user.append(user_id)
+            await bot.send(event=event, message="私聊比赛提醒已开启！")
+        else:
+            await bot.send(event=event, message="你已经开启了比赛提醒！")
+
+reminder_end = on_command("cf比赛提醒关闭", block=True)
+@reminder_end.handle()
+async def handle_reminder_end(bot: Bot, event: MessageEvent):
+    if isinstance(event, GroupMessageEvent):
+        if event.group_id in reminder_group:
+            reminder_group.remove(event.group_id)
+            await bot.send(event=event, message="群聊比赛提醒已关闭！")
+        else:
+            await bot.send(event=event, message="本群没有开启比赛提醒！")
+    elif isinstance(event, PrivateMessageEvent):
+        user_id = event.get_user_id()
+        if user_id in reminder_user:
+            reminder_user.remove(user_id)
+            await bot.send(event=event, message="私聊比赛提醒已关闭！")
+        else:
+            await bot.send(event=event, message="你没有开启比赛提醒！")
+
+'''
+数据库
+'''
+
+from nonebot import get_bots
+from nonebot_plugin_orm import async_scoped_session, get_session
+import requests
+import sqlalchemy
+from datetime import datetime
+from sqlalchemy.future import select
+
+from nonebot import require
+require("nonebot_plugin_apscheduler")
+from nonebot_plugin_apscheduler import scheduler
+
+from nonebot_plugin_orm import Model
+from sqlalchemy.orm import Mapped, mapped_column
+import sqlalchemy.types as types
+
+from sqlalchemy import Column, Integer, String, DateTime
+from nonebot_plugin_orm import Model
+
+class Contest(Model):
+    id = Column(Integer, primary_key=True)
+    name = Column(String)
+    type = Column(String)
+    status = Column(String)
+    start_time = Column(DateTime)
+    end_time = Column(DateTime)
+
+
+# 获取新比赛
+async def get_contests_before_new(gym=False):
+    response = requests.get("https://codeforces.com/api/contest.list", params={"gym": str(gym).lower()})
+    new_contests = []
+    if response.status_code == 200:
+        data = response.json()
+        if data['status'] == 'OK':
+            session = get_session()
+            async with session() as s:
+                result = await s.execute(select(Contest.id))
+                existing_ids = {id[0] for id in result.scalars().all()}
+                for contest in data['result']:
+                    if contest['phase'] == 'BEFORE' and contest['id'] not in existing_ids:
+                        new_contest = Contest(
+                            id=contest['id'],
+                            name=contest['name'],
+                            type='CF',
+                            status=contest['phase'],
+                            start_time=datetime.fromtimestamp(contest['startTimeSeconds']),
+                            end_time=datetime.fromtimestamp(contest['startTimeSeconds'] + contest['durationSeconds'])
+                        )
+                        s.add(new_contest)
+                        new_contests.append(new_contest)
+                await s.commit()
+        else:
+            print("Error fetching contests: ", data['comment'])
+    else:
+        print("HTTP Error: ", response.status_code)
+    return new_contests
+
+# 通知用户新的比赛信息
+async def notify_users(contests):
+    message = "\n".join(f"新比赛: {contest.name} - 开始时间: {contest.start_time.strftime('%Y-%m-%d %H:%M:%S')}" for contest in contests)
+    bots = get_bots()
+    if bots:
+        for bot in bots.values():
+            for group in reminder_group:
+                await bot.send_group_msg(group_id=group, message=message)
+            for user in reminder_user:
+                await bot.send_private_msg(user_id=user, message=message)
+
+# 设置定时任务，每2个小时执行一次检查
+@scheduler.scheduled_job("cron", hour="*/2", id="job_0")
+async def routine_contest_check():
+    logger.info("检查比赛...")
+    contests = await get_contests_before_new()
+    if contests:
+        logger.info("有新的比赛")
+        await notify_users(contests)
+    else:
+        logger.info("没有新的比赛")
