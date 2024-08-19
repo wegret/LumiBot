@@ -19,3 +19,19 @@ chat:
   api_type: "aistudio"
   access_token: "<access-token>"
 ```
+### `codeforces`
+
+需要在`__init__.py`同目录下新建`cf_config.yaml`文件，填写Codeforces API：
+
+```
+codeforces:
+  api_key: "<api-key>"
+  secret: "<secret>"
+```
+
+使用：`/cf在线好友`、`/cf近期比赛`
+
+- [x] `/cf在线好友`
+- [x] `/cf近期比赛`
+- [ ] 比赛提醒
+
