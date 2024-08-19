@@ -51,8 +51,9 @@ user_sessions = defaultdict(list)   # 聊天记录
 '''
 大模型和prompt
 '''
+base_modifier = "慈爱的"
 base_role = "猫娘"
-base_prompt = f"请你扮演一个{base_role}，根据下面的聊天记录进行回复。"
+base_prompt = f"请你扮演一个{base_modifier}{base_role}，根据下面的聊天记录进行回复。"
 
 async def get_model_response(text, user_id):
     global base_prompt
@@ -119,8 +120,6 @@ chat = on_message(rule=chat_rule(), priority=chat_priority)
 async def handle_chat(bot: Bot, matcher: Matcher, event: MessageEvent):
     text = str(event.get_message().extract_plain_text().strip())
     user_id = event.get_user_id()
-
-    logger.info(f"输入艾特文字{text}")
 
     reply = await get_model_response(text, user_id)
     await bot.send(event=event, message=Message(f"[CQ:at,qq={user_id}] {reply}"), auto_escape=True)
