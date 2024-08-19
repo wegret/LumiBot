@@ -5,6 +5,7 @@ from .config import Config
 from nonebot import on_message
 from nonebot.rule import to_me, Rule
 from nonebot.adapters import Bot, Event
+from nonebot.adapters.onebot.v11 import Message, MessageSegment
 from nonebot.plugin import on
 from nonebot.typing import T_State
 
@@ -66,8 +67,9 @@ guanyin_divine = GuanyinDivine()
 
 @divine.handle()
 async def handle_divine(bot: Bot, event: Event):
+    at_ = f'[CQ:at,qq={event.get_user_id()}]  '
     sign = guanyin_divine.get_sign()
-    # at_ = f"[CQ:at,qq={event.get_user_id()}] "
-    reply = guanyin_divine.format_sign(sign)
-    await bot.send(event=event, message=str(reply), auto_escape=True)
+    reply = at_ + guanyin_divine.format_sign(sign)
+
+    await bot.send(event=event, message=Message(reply), auto_escape=True)
     
