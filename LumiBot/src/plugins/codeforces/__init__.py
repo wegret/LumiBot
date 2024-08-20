@@ -34,6 +34,12 @@ def generate_api_signature(rand, method_name, params, secret):
     sig_str = f"{rand}/{method_name}?{param_str}#{secret}"
     return hashlib.sha512(sig_str.encode()).hexdigest()
 
+from datetime import datetime, timedelta, timezone
+def convert_to_beijing_time(unix_timestamp):
+    utc_time = datetime.utcfromtimestamp(unix_timestamp)
+    beijing_time = utc_time + timedelta(hours=8)
+    return beijing_time.strftime('%Y-%m-%d %H:%M:%S')
+
 '''
 查询在线好友
 '''
@@ -78,6 +84,55 @@ async def handle_ask_online(bot: Bot, event: MessageEvent):
     await bot.send(event=event, message=Message(reply), auto_escape=True)
 
 '''
+最后一次提交查询
+'''
+def fetch_last_submission(handle):
+    api_url = f"https://codeforces.com/api/user.status?handle={handle}&from=1&count=1"
+    try:
+        response = requests.get(api_url)
+        response.raise_for_status()
+        data = response.json()
+        if data['status'] == 'OK':
+            return data['result'][0]
+        else:
+            return None
+    except requests.RequestException as e:
+        print(f"An error occurred: {e}")
+        return None
+
+from nonebot.typing import T_State
+from nonebot.params import Arg, ArgPlainText, CommandArg, Matcher
+from nonebot.plugin.on import on_startswith
+
+ask_doing = on_startswith("/在干嘛", block=True)
+@ask_doing.handle()
+async def handle_ask_doing(bot: Bot, event: MessageEvent, state: T_State):
+    args = str(event.get_message()).strip().split()
+    if len(args) > 1:
+        handle = args[1]
+    else:
+        await bot.send(event=event, message="请提供一个 Codeforces 用户名。")
+        return
+
+    try:
+        submission = fetch_last_submission(handle)
+        if submission:
+            tags = ", ".join(submission['problem']['tags'])
+            reply = "\n".join([
+                f"{handle} 的最后一次提交：",
+                f"题目：{submission['problem']['contestId']} - {submission['problem']['index']} {submission['problem']['name']}",
+                f"时间：{convert_to_beijing_time(submission['creationTimeSeconds'])}",
+                f"链接：https://codeforces.com/contest/{submission['problem']['contestId']}/problem/{submission['problem']['index']}",
+                f"rate：{submission['problem'].get('rating', '未知')}",  # 有些题目可能没有 rating
+                f"tags：{tags}"
+            ])
+            await bot.send(event=event, message=reply)
+        else:
+            await bot.send(event=event, message=f"没有找到 {handle} 的提交记录。")
+    except Exception as e:
+        await bot.send(event=event, message=f"获取数据时发生错误：{str(e)}")
+
+'''
 查询近期比赛
 '''
 def get_contests_before(gym=False):
@@ -91,13 +146,6 @@ def get_contests_before(gym=False):
             return data['comment']
     else:
         return f"HTTP Error {response.status_code}"
-
-from datetime import datetime, timedelta, timezone
-def convert_to_beijing_time(unix_timestamp):
-    utc_time = datetime.utcfromtimestamp(unix_timestamp)
-    beijing_time = utc_time + timedelta(hours=8)
-    return beijing_time.strftime('%Y-%m-%d %H:%M:%S')
-
 
 def display_contests(contests):
     for contest in contests:
@@ -196,9 +244,8 @@ async def get_contests_before_new(gym=False):
     if response.status_code == 200:
         data = response.json()
         if data['status'] == 'OK':
-            session = get_session()
-            async with session() as s:
-                result = await s.execute(select(Contest.id))
+            async with get_session() as session:
+                result = await session.execute(select(Contest.id))
                 existing_ids = {id[0] for id in result.scalars().all()}
                 for contest in data['result']:
                     if contest['phase'] == 'BEFORE' and contest['id'] not in existing_ids:
@@ -210,9 +257,9 @@ async def get_contests_before_new(gym=False):
                             start_time=datetime.fromtimestamp(contest['startTimeSeconds']),
                             end_time=datetime.fromtimestamp(contest['startTimeSeconds'] + contest['durationSeconds'])
                         )
-                        s.add(new_contest)
+                        session.add(new_contest)
                         new_contests.append(new_contest)
-                await s.commit()
+                await session.commit()
         else:
             print("Error fetching contests: ", data['comment'])
     else:
