@@ -2,3 +2,4 @@
 __pycache__/
 chat_config.yaml
 cf_config.yaml
+userInfo.json
