@@ -37,10 +37,9 @@ http_header = {
     "Accept-Encoding": "gzip, deflate, br",
     "Connection": "keep-alive",
     "Accept": "*/*",
-    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 11_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E217 MicroMessenger/6.8.0(0x16080000) NetType/WIFI Language/en Branch/Br_trunk MiniProgramEnv/Mac",
-    "Content-Length": "126",
-    "Referer": "https://servicewechat.com/wx4890ebb3c7b628d9/98/page-frame.html",
-    "Accept-Language": "zh-CN,zh-Hans;q=0.9"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 MicroMessenger/7.0.20.1781(0x6700143B) NetType/WIFI MiniProgramEnv/Windows WindowsWechat/WMPF WindowsWechat(0x63090b19)XWEB/11253",
+    "Referer": "https://servicewechat.com/wx4890ebb3c7b628d9/99/page-frame.html",
+    "Accept-Language": "zh-CN,zh;q=0.9"
 }
 session = requests.Session()
 serverUrl = "https://tingke.xmu.edu.cn/app"

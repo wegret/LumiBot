@@ -39,6 +39,13 @@ with open(config_path, 'r', encoding='utf-8') as file:
 API_TYPE = config['chat']['api_type']
 ACCESS_TOKEN = config['chat']['access_token']
 
+
+API_KEY = config['llm']['API_KEY']
+MODEL_NAME = config['llm']['MODEL_NAME']
+API_URL = config['llm']['API_URL']
+import requests
+import json
+
 erniebot.api_type = API_TYPE
 erniebot.access_token = ACCESS_TOKEN
 
@@ -54,26 +61,7 @@ user_sessions = defaultdict(list)   # 聊天记录
 base_modifier = "慈爱的"
 base_role = "猫娘"
 base_prompt = f"请你扮演一个{base_modifier}{base_role}，根据下面的聊天记录进行回复。"
-
-async def get_model_response(text, user_id):
-    global base_prompt
-    global base_role
-    global user_sessions
-
-    session_text = "".join([f"{entry['role']}: {entry['content']}\n" for entry in user_sessions[user_id]])
-    prompt = base_prompt + session_text + f"用户: {text}\n {base_role}:"
-
-    response = erniebot.ChatCompletion.create(
-        model='ernie-3.5',
-        messages=[{'role': 'user', 'content': prompt}]
-    )
-    model_reply = response.get_result()
-
-    # 更新会话历史
-    user_sessions[user_id].append({"role": "user", "content": text})
-    user_sessions[user_id].append({"role": "catgirl", "content": model_reply})
-
-    return model_reply
+attach_prompt = f"（每次回复不要超过100字）"
 
 '''
 状态机
@@ -116,10 +104,89 @@ def chat_rule():
     return Rule(_chat_rule)
 chat = on_message(rule=chat_rule(), priority=chat_priority)
 
+from nonebot.log import logger
+
+from uuid import uuid4
+stream_flags = {}  # 每个用户的流标志存储
+
 @chat.handle()
 async def handle_chat(bot: Bot, matcher: Matcher, event: MessageEvent):
+    global base_prompt
+    global base_role
+    global user_sessions
+    global stream_flags
+
     text = str(event.get_message().extract_plain_text().strip())
     user_id = event.get_user_id()
 
-    reply = await get_model_response(text, user_id)
-    await bot.send(event=event, message=Message(f"[CQ:at,qq={user_id}] {reply}"), auto_escape=True)
+    stream_flags[user_id] = uuid4().hex
+    current_stream_flag = stream_flags[user_id]
+
+    session_text = "".join([f"{entry['role']}: {entry['content']}\n" for entry in user_sessions[user_id]])
+    prompt = base_prompt + session_text + f"用户: {text}\n {base_role}:" + attach_prompt
+
+    response = requests.post(
+        API_URL,
+        headers={
+            "Authorization": f"Bearer {API_KEY}",
+            "Content-Type": "application/json"
+        },
+        data=json.dumps({
+            "model": MODEL_NAME,
+            "stream": True,  # 启用流式传输
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
+        }),
+        stream=True  # 启用请求的流式传输
+    )
+
+    model_reply = ""
+
+    if response.status_code == 200:
+        buffer = ""
+        for line in response.iter_lines(decode_unicode=True):
+            if stream_flags[user_id] != current_stream_flag:
+                break
+            if line:
+                line = line.lstrip("data: ").strip()
+                logger.info(line)
+                try:
+                    data = json.loads(line)
+                    if "choices" in data and data["choices"]:
+                        delta = data["choices"][0].get("delta", {})
+                        content = delta.get("content", "")
+                        if content:
+                            #    print(content)
+                            buffer += content
+                            if ("。" in content):
+                                buffer = buffer.strip("\n")
+                                if buffer:
+                                    # print(buffer)
+                                    logger.info(buffer)
+                                    model_reply += buffer
+                                    await bot.send(event=event,
+                                                   message=Message(f"[CQ:at,qq={user_id}] {buffer}"),
+                                                   auto_escape=True)
+                                buffer = ""
+                except json.JSONDecodeError:
+                    if line.strip() == "[DONE]":
+                        break
+                    else:
+                        print(f"无法解析的JSON数据: {line}")
+        if buffer and stream_flags[user_id] == current_stream_flag :
+            model_reply += buffer
+            await bot.send(event=event,
+                           message=Message(f"[CQ:at,qq={user_id}] {buffer}"),
+                           auto_escape=True)
+
+    else:
+        await bot.send(event=event, message=Message(f"[CQ:at,qq={user_id}] 好像发生了一些错误！"), auto_escape=True)
+
+    if model_reply:
+        # 更新会话历史
+        user_sessions[user_id].append({"role": "user", "content": text})
+        user_sessions[user_id].append({"role": base_role, "content": model_reply})
